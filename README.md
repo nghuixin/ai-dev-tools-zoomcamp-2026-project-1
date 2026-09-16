@@ -4,6 +4,12 @@ Local MVP for a single site manager: log a free-text site issue, optionally get 
 
 This repository is **AI Dev Tools Zoomcamp 2026 — Project 1**.
 
+## Problem
+
+Site managers log operational issues as free text and then reconstruct category, severity, owner, and next steps by hand. Intake is slow, lists are hard to scan, and the original judgment trail is lost when a record is later edited.
+
+This project exists so a site manager can describe an issue in their own words, get an optional AI triage, edit and save it, and track it to resolution without that extra reconstruction work.
+
 ## What it does
 
 A site manager picks a study and site, describes an operational issue, and can run **Analyze** to pre-fill category, severity, summary, recommended action, and a one-line rationale. The form stays editable. AI failure never blocks saving.
