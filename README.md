@@ -55,10 +55,9 @@ CTMS/EDC integration, authentication, email ingestion, CAPA workflow, clinical d
 
 - Full flow works and data survives restart.
 
+See [`product-spec.md`](./product-spec.md) for vocabularies, the AI contract, and the data model.
+
 
 ## Learning in Public
 - https://nghuixin.notion.site/Clinical-Trial-Site-Issue-Triage-Assistant-3f072266c5fb80a8b500d9331f392def
 
-- In a 30-issue pilot: ≥70% of AI categories and ≥60% of severities saved unchanged; median log time ≤ 2 minutes.
-
-See [`product-spec.md`](./product-spec.md) for vocabularies, the AI contract, and the data model.
