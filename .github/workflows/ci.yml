@@ -1,0 +1,102 @@
+name: CI/CD
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install and test
+        run: |
+          uv sync
+          uv run pytest
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose files
+        run: |
+          docker compose -f docker-compose.yaml config >/dev/null
+          docker compose -f docker-compose.prod.yaml config >/dev/null
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Start dev stack
+        run: docker compose -f docker-compose.yaml up -d --build
+      - name: Wait for API
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/api/studies >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f docker-compose.yaml logs
+          exit 1
+      - name: Integration tests
+        working-directory: backend
+        env:
+          INTEGRATION_BASE_URL: http://127.0.0.1:8000
+        run: |
+          uv sync
+          uv run pytest ../tests/integration -m integration
+      - name: Stop stack
+        if: always()
+        run: docker compose -f docker-compose.yaml down
+
+  # Deploy artifact is GHCR :prod. Gate on unit tests + compose validate only.
+  # The integration job stays as CI; it does not block publish (compose HTTP can be slow/fragile).
+  publish:
+    name: Publish production image
+    needs: [test, compose]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}/site-issue-triage" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:prod
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: How to run production
+        run: |
+          echo "On the production host (pull :prod, then compose):"
+          echo "  export PROD_IMAGE=${{ steps.image.outputs.name }}:prod"
+          echo "  docker compose -f docker-compose.prod.yaml pull"
+          echo "  docker compose -f docker-compose.prod.yaml up -d"

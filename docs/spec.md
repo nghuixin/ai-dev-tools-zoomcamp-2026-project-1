@@ -20,7 +20,7 @@ A site manager can:
 3. Optionally run **Analyze** to pre-fill triage fields.
 4. Edit the form.
 5. Save the issue.
-6. Find it in a list.
+6. Find it in the list.
 7. Update status.
 8. Resolve it with a note.
 

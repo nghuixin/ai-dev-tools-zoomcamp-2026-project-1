@@ -1,0 +1,530 @@
+openapi: 3.1.0
+info:
+  title: Site Issue Triage API
+  version: 0.1.0
+  description: |
+    Contract extracted from `frontend/src/services/httpIssueService.ts`
+    (and `frontend/src/api.ts`).
+
+    **Auth: none.** The client never sends `Authorization` or cookies.
+    Every operation has `security: []`. Do not add auth without changing
+    the frontend client.
+
+    JSON is snake_case. Errors are `{ "error": string }`.
+servers:
+  - url: http://127.0.0.1:8000
+    description: Local API (`VITE_API_URL`)
+security: []
+
+paths:
+  /api/studies:
+    get:
+      operationId: listStudies
+      summary: List studies
+      description: Seeded study list. No request body. No auth.
+      security: []
+      responses:
+        "200":
+          description: Array of studies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Study"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/sites:
+    get:
+      operationId: listSites
+      summary: List sites
+      description: Optional `study_id` query. No request body. No auth.
+      security: []
+      parameters:
+        - name: study_id
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: If present, only sites for that study
+      responses:
+        "200":
+          description: Array of sites
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Site"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createSite
+      summary: Create a site inline
+      description: No auth.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSiteRequest"
+      responses:
+        "200":
+          description: Created site (client accepts any 2xx JSON)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Site"
+        "201":
+          description: Created site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Site"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/issues/analyze:
+    post:
+      operationId: analyzeIssue
+      summary: Optional AI triage
+      description: |
+        No auth. On invalid or failed output the client shows the `error`
+        string; it expects `suggestion unavailable`. Save must still work.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeRequest"
+      responses:
+        "200":
+          description: Suggestion used to pre-fill the log form
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiSuggestion"
+        "400":
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/SuggestionUnavailable"
+        "503":
+          $ref: "#/components/responses/SuggestionUnavailable"
+
+  /api/issues:
+    get:
+      operationId: listIssues
+      summary: List issues
+      description: |
+        No auth. Query filters match `IssueFilters`.
+        Default UI sends `status=active` (hide RESOLVED).
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/StudyId"
+        - $ref: "#/components/parameters/SiteId"
+        - $ref: "#/components/parameters/StatusFilter"
+        - $ref: "#/components/parameters/SeverityFilter"
+      responses:
+        "200":
+          description: Issue rows (notes optional / omitted)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Issue"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createIssue
+      summary: Create issue
+      description: No auth. Client always sends category and severity.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateIssueRequest"
+      responses:
+        "200":
+          description: Created issue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issue"
+        "201":
+          description: Created issue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issue"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/issues.csv:
+    get:
+      operationId: exportIssuesCsv
+      summary: Export filtered list as CSV
+      description: Same query params as listIssues. Response is a file blob. No auth.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/StudyId"
+        - $ref: "#/components/parameters/SiteId"
+        - $ref: "#/components/parameters/StatusFilter"
+        - $ref: "#/components/parameters/SeverityFilter"
+      responses:
+        "200":
+          description: CSV download
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/issues/{id}:
+    get:
+      operationId: getIssue
+      summary: Get issue detail
+      description: No auth. Client expects `notes` on this response.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/IssueId"
+      responses:
+        "200":
+          description: Issue including notes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issue"
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      operationId: updateIssue
+      summary: Patch issue fields and/or status
+      description: |
+        No auth. Partial body. Resolving sends `{ status, resolution_note }`.
+        Status-only updates send `{ status }`.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/IssueId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateIssueRequest"
+      responses:
+        "200":
+          description: Updated issue including notes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issue"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/issues/{id}/notes:
+    post:
+      operationId: addIssueNote
+      summary: Append a note
+      description: No auth. Append-only.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/IssueId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateNoteRequest"
+      responses:
+        "200":
+          description: Created note
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueNote"
+        "201":
+          description: Created note
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueNote"
+        default:
+          $ref: "#/components/responses/Error"
+
+components:
+  securitySchemes: {}
+
+  parameters:
+    IssueId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+    StudyId:
+      name: study_id
+      in: query
+      required: false
+      schema:
+        type: integer
+    SiteId:
+      name: site_id
+      in: query
+      required: false
+      schema:
+        type: integer
+    StatusFilter:
+      name: status
+      in: query
+      required: false
+      description: |
+        `active` hides RESOLVED (frontend default).
+        `ALL` includes every status.
+        Otherwise one of OPEN, IN_PROGRESS, ESCALATED, RESOLVED.
+      schema:
+        type: string
+    SeverityFilter:
+      name: severity
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/Severity"
+
+  responses:
+    Error:
+      description: Client reads `error` as the message
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    SuggestionUnavailable:
+      description: Analyze failed; frontend shows this string and still allows save
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: suggestion unavailable
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    Category:
+      type: string
+      enum:
+        - PROTOCOL_DEVIATION
+        - SAFETY_REPORTING
+        - CONSENT
+        - REGULATORY_IRB
+        - ENROLLMENT
+        - IP_MANAGEMENT
+        - DATA_QUALITY
+        - STAFFING_TRAINING
+        - MONITORING_FINDING
+        - EQUIPMENT_LAB
+        - CONTRACT_BUDGET
+        - OTHER
+
+    Severity:
+      type: string
+      enum: [CRITICAL, HIGH, MEDIUM, LOW]
+
+    Status:
+      type: string
+      enum: [OPEN, IN_PROGRESS, ESCALATED, RESOLVED]
+
+    Study:
+      type: object
+      required: [id, code, name]
+      properties:
+        id: { type: integer }
+        code: { type: string }
+        name: { type: string }
+
+    Site:
+      type: object
+      required: [id, study_id, code, name]
+      properties:
+        id: { type: integer }
+        study_id: { type: integer }
+        code: { type: string }
+        name: { type: string }
+
+    CreateSiteRequest:
+      type: object
+      required: [study_id, name]
+      properties:
+        study_id: { type: integer }
+        name: { type: string }
+        code:
+          type: string
+          description: Optional site number
+
+    AnalyzeRequest:
+      type: object
+      required: [study, site, description]
+      properties:
+        study: { type: string }
+        site: { type: string }
+        description: { type: string }
+
+    AiSuggestion:
+      type: object
+      required:
+        [category, severity, summary, recommended_action, rationale, phi_flag]
+      properties:
+        category:
+          $ref: "#/components/schemas/Category"
+        severity:
+          $ref: "#/components/schemas/Severity"
+        summary:
+          type: string
+          maxLength: 200
+        recommended_action: { type: string }
+        rationale: { type: string }
+        phi_flag: { type: boolean }
+
+    IssueNote:
+      type: object
+      required: [id, issue_id, body, created_at]
+      properties:
+        id: { type: integer }
+        issue_id: { type: integer }
+        body: { type: string }
+        created_at:
+          type: string
+          format: date-time
+
+    Issue:
+      type: object
+      required:
+        - id
+        - study_id
+        - site_id
+        - study
+        - site
+        - description
+        - category
+        - severity
+        - summary
+        - recommended_action
+        - status
+        - edited_fields
+        - phi_flag
+        - created_at
+        - updated_at
+        - age_days
+        - overdue
+      properties:
+        id: { type: integer }
+        study_id: { type: integer }
+        site_id: { type: integer }
+        study:
+          $ref: "#/components/schemas/Study"
+        site:
+          $ref: "#/components/schemas/Site"
+        description: { type: string }
+        category:
+          $ref: "#/components/schemas/Category"
+        severity:
+          $ref: "#/components/schemas/Severity"
+        summary: { type: string }
+        recommended_action: { type: string }
+        status:
+          $ref: "#/components/schemas/Status"
+        owner:
+          type: [string, "null"]
+        due_date:
+          type: [string, "null"]
+          format: date
+        resolution_note:
+          type: [string, "null"]
+        ai_suggestion:
+          oneOf:
+            - $ref: "#/components/schemas/AiSuggestion"
+            - type: "null"
+        edited_fields:
+          type: array
+          items: { type: string }
+        phi_flag: { type: boolean }
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: [string, "null"]
+          format: date-time
+        age_days: { type: integer }
+        overdue: { type: boolean }
+        notes:
+          type: array
+          items:
+            $ref: "#/components/schemas/IssueNote"
+          description: Present on GET/PATCH /api/issues/{id}
+
+    CreateIssueRequest:
+      type: object
+      required: [study_id, site_id, description, category, severity]
+      properties:
+        study_id: { type: integer }
+        site_id: { type: integer }
+        description: { type: string }
+        category:
+          $ref: "#/components/schemas/Category"
+        severity:
+          $ref: "#/components/schemas/Severity"
+        summary: { type: string }
+        recommended_action: { type: string }
+        owner:
+          type: [string, "null"]
+        due_date:
+          type: [string, "null"]
+        ai_suggestion:
+          oneOf:
+            - $ref: "#/components/schemas/AiSuggestion"
+            - type: "null"
+        phi_flag: { type: boolean }
+
+    UpdateIssueRequest:
+      type: object
+      description: Partial. Frontend may send fields, status only, or status + resolution_note.
+      properties:
+        study_id: { type: integer }
+        site_id: { type: integer }
+        description: { type: string }
+        category:
+          $ref: "#/components/schemas/Category"
+        severity:
+          $ref: "#/components/schemas/Severity"
+        summary: { type: string }
+        recommended_action: { type: string }
+        status:
+          $ref: "#/components/schemas/Status"
+        owner:
+          type: [string, "null"]
+        due_date:
+          type: [string, "null"]
+        resolution_note:
+          type: [string, "null"]
+        phi_flag: { type: boolean }
+
+    CreateNoteRequest:
+      type: object
+      required: [body]
+      properties:
+        body: { type: string }

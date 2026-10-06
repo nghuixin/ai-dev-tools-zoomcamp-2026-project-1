@@ -1,0 +1,37 @@
+# Reusable verify workflow for Site Issue Triage.
+# Call from another workflow with:
+#   jobs:
+#     verify:
+#       uses: ./.github/workflows/reusable-verify.yml
+# Existing CI/CD stays in ci.yml. Publish still needs: [test, compose] there.
+# This file is not in that publish graph.
+name: Verify (reusable)
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install and test
+        run: |
+          uv sync
+          uv run pytest
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose files
+        run: |
+          docker compose -f docker-compose.yaml config >/dev/null
+          docker compose -f docker-compose.prod.yaml config >/dev/null
