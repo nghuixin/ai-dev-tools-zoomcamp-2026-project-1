@@ -1,0 +1,24 @@
+groups:
+  - name: site-issue-triage
+    rules:
+      # Share of POST /api/issues (create issue) requests that returned 5xx.
+      # Metrics come from prometheus-fastapi-instrumentator (status grouped as 2xx/4xx/5xx).
+      - alert: CreateIssue5xxRateHigh
+        expr: |
+          sum(rate(http_requests_total{handler="/api/issues", method="POST", status="5xx"}[2m]))
+            /
+          clamp_min(sum(rate(http_requests_total{handler="/api/issues", method="POST"}[2m])), 1e-9)
+            > 0.05
+        for: 1m
+        labels:
+          severity: page
+          service: site-issue-triage-api
+          route: POST /api/issues
+        annotations:
+          summary: "Creating issues is failing: {{ $value | humanizePercentage }} of POST /api/issues returned 5xx"
+          description: >-
+            More than 5% of POST /api/issues requests returned a 5xx status over the last 2 minutes,
+            sustained for 1 minute. Site managers cannot save new issues.
+          runbook: >-
+            Check API logs in Grafana (Loki: {service="api"} | json | status >= 500), open a trace ID
+            in Tempo, then check the database. For a demo, FAULT_CREATE_ISSUE_500_RATE injects failures.

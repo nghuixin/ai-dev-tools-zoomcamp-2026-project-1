@@ -48,16 +48,25 @@ After CI publishes the image, a host can pull and run it by hand: set `PROD_IMAG
 
 Single-container image without Postgres (SQLite inside the container): `make image` then `docker run --rm -p 8000:8000 site-issue-triage`.
 
-AWS EC2 was attempted; local `make` and Compose above are the documented run path.
+Dev stack host ports are configurable (`API_PORT`, `GRAFANA_PORT`, `PROMETHEUS_PORT`, `LOKI_PORT`) if the defaults are taken.
+
+## Live deployment
+
+**Live at [http://3.238.5.106/log](http://3.238.5.106/log)** — the production Compose stack on AWS EC2. CI/CD's deploy jobs update it once the EC2 secrets are configured (see [CI / CD](#ci--cd)).
+
+![Live Log issue page on EC2](./docs/screenshots/live-ec2-log.png)
 
 ## Tests
 
 | Command | What it hits |
 |---|---|
+| `make test-all` | **Everything, one command:** starts Compose, waits for the API, runs unit + integration tests, tears down (same as CI) |
 | `make test` | Backend unit tests (`backend/tests/`) — in-process FastAPI + in-memory SQLite |
 | `make test-integration` | HTTP tests (`tests/integration/`) against a **running** Compose stack |
 
-Integration tests need the dev stack up and `INTEGRATION_BASE_URL` (default `http://127.0.0.1:8000`):
+`make test-all` uses its own Compose project (`site-issue-triage-test`), so it does not stop a `make up` stack; set `API_PORT` if 8000 is taken.
+
+To run integration tests against a stack you started yourself, bring up the dev stack and set `INTEGRATION_BASE_URL` (default `http://127.0.0.1:8000`):
 
 ```bash
 make up
@@ -70,9 +79,37 @@ On macOS/Linux: `INTEGRATION_BASE_URL=http://127.0.0.1:8000 make test-integratio
 
 ## CI / CD
 
-One workflow: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml). Every push, PR, and dispatch runs unit pytest and validates both Compose files. On `main` / `master` (or `workflow_dispatch`), after those two jobs succeed, it publishes `site-issue-triage:prod` (and the commit SHA tag) to GHCR.
+One workflow: [`.github/workflows/ci.yml`](./.github/workflows/ci.yml).
 
-Host pull is **manual** — this repo does not SSH-deploy. A production host pulls `:prod` and runs `docker-compose.prod.yaml`. Compose HTTP tests also run in CI but do not gate the publish.
+```
+test ─┐
+      ├─► publish (GHCR :prod, :<sha>) ─► deploy-dev (auto) ─► deploy-prod (approval)
+compose ┘
+integration (make test-all) — runs on every push, does not gate publish
+```
+
+- **Every push, PR and dispatch:** unit pytest, Compose validation (including the observability profile) and `make test-all`.
+- **On `master` / `main`:** after tests pass, `publish` pushes the image to GHCR.
+- **`deploy-dev`** SSHes to EC2 and runs `docker compose pull && up -d` for a dev stack on port 8081, then checks health.
+- **`deploy-prod`** runs in the protected `production` environment: a required reviewer approves, then the same image (`:<sha>`) is rolled out to the live stack.
+- Deploys need the `EC2_HOST` variable and `EC2_SSH_KEY` secret and are skipped until they're set. Setup: [`docs/deployment.md`](./docs/deployment.md).
+
+## Observability
+
+`make up-obs` starts the dev stack plus Grafana, Tempo, Loki (fed by Alloy) and Prometheus:
+
+| | URL | What |
+|---|---|---|
+| Grafana | [http://127.0.0.1:3000](http://127.0.0.1:3000) | Dashboard **Site Issue Triage API**; Explore for logs and traces |
+| Prometheus | [http://127.0.0.1:9090](http://127.0.0.1:9090) | Metrics and the `CreateIssue5xxRateHigh` alert |
+
+- **Traces:** OpenTelemetry auto-instruments FastAPI and exports to Tempo.
+- **Logs:** every request is one JSON line with `trace_id`, method, route, status and duration. In Grafana, a log line's trace ID links to the trace.
+- **Metrics:** `/metrics` (Prometheus format, not part of the OpenAPI contract).
+- **Alert:** `CreateIssue5xxRateHigh` fires when more than 5% of `POST /api/issues` return 5xx for a minute ([`ops/observability/alerts.yml`](./ops/observability/alerts.yml)). `make alert-demo` restarts the API with half of creates failing (`FAULT_CREATE_ISSUE_500_RATE=0.5`) to see it fire.
+- **Alert → coding agent:** `make poll-alerts` runs [`scripts/poll_alerts.py`](./scripts/poll_alerts.py). It polls Prometheus, gathers the matching 5xx logs and trace IDs from Loki, writes an incident brief to `.alerts/`, and hands it to `ALERT_AGENT_CMD` (for example `claude -p`). Without an agent it prints the brief. [Example brief](./docs/observability/example-alert-brief.md).
+
+![Grafana dashboard during the alert demo](./docs/screenshots/grafana-dashboard.png)
 
 ## Expected behavior
 
@@ -92,6 +129,9 @@ Host pull is **manual** — this repo does not SSH-deploy. A production host pul
 - Permissions: [`docs/permissions.md`](./docs/permissions.md)
 - Extension pack: [`docs/extension-pack.md`](./docs/extension-pack.md)
 - Criteria log: [`docs/criteria-log.md`](./docs/criteria-log.md)
+- Deployment setup: [`docs/deployment.md`](./docs/deployment.md)
+- What was added for deployment, testing, issues and observability: [`docs/implemented-improvements.md`](./docs/implemented-improvements.md)
+- Issues with acceptance criteria: [GitHub Issues](https://github.com/nghuixin/ai-dev-tools-zoomcamp-2026-project-1/issues?q=is%3Aissue)
 - API contract: [`openapi.yaml`](./openapi.yaml)
 - Agent instructions: [`AGENTS.md`](./AGENTS.md)
 
@@ -110,7 +150,7 @@ Analyze output is operational next steps only. No clinical advice, causality, or
 
 ## Out of scope
 
-CTMS/EDC integration, authentication, email ingestion, CAPA workflow, clinical decision support, notifications, and duplicate detection.
+CTMS/EDC integration, authentication, email ingestion, CAPA workflow, clinical decision support, notifications, and duplicate detection. (Alerts and the alert poller are operations tooling, not product notifications.)
 
 ## Success (MVP)
 

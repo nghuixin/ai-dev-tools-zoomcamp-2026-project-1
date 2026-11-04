@@ -18,7 +18,12 @@ Dockerfile
 docker-compose.yaml
 docker-compose.prod.yaml
 tests/integration
-.github/workflows/ci.yml   CI/CD: unit pytest + compose validate, then GHCR :prod on main/master
+.github/workflows/ci.yml   CI/CD: unit pytest + compose validate, then GHCR :prod on main/master, then deploy-dev (auto) → deploy-prod (approval) on EC2
+backend/app/telemetry.py    OTel tracing, JSON logs with trace_id, /metrics, opt-in fault injection
+ops/observability/          Prometheus (+ alerts.yml), Tempo, Alloy, Grafana provisioning for the `observability` Compose profile
+scripts/test-all.sh         make test-all: Compose up, wait, unit + integration tests, teardown
+scripts/poll_alerts.py      Firing Prometheus alerts → incident brief → coding agent (ALERT_AGENT_CMD)
+docs/deployment.md          EC2 deploy setup (environments, secrets, host)
 .agents                     Course pack: skills + PM / SWE / QA
 docs/extension-pack.md      Pack map (skills, subagents, orchestration, permissions)
 README.md
@@ -58,6 +63,11 @@ make up        # dev compose: http://127.0.0.1:8000
 make down      # stop dev compose (volume kept)
 make up-prod   # production compose: http://127.0.0.1:8080
 make down-prod # stop production compose (volume kept)
+make test-all  # Compose up, wait for API, unit + integration tests, teardown (same as CI)
+make up-obs    # dev compose + Grafana :3000, Prometheus :9090, Loki :3100, Tempo, Alloy
+make down-obs  # stop the observability stack
+make alert-demo   # restart API with FAULT_CREATE_ISSUE_500_RATE=0.5 to fire CreateIssue5xxRateHigh
+make poll-alerts  # hand firing alerts to ALERT_AGENT_CMD (dry run if unset)
 ```
 
 Commit to git regularly.
@@ -74,7 +84,9 @@ Commit to git regularly.
 - List default: hide `RESOLVED`; sort severity then oldest. CSV export uses the active filters.
 - Store original `ai_suggestion` beside saved values and mark edited fields.
 - `LogIssuePage` takes a `tweaks` prop. `tweaks.analyze === "unavailable"` must show **suggestion unavailable** without calling Analyze.
-- Keep `openapi.yaml` in sync when adding or changing endpoints.
+- Keep `openapi.yaml` in sync when adding or changing endpoints. `/metrics` is an operations endpoint and stays out of the schema.
+- Log through `logging` so lines come out as JSON with `trace_id`; don't print. Never log issue descriptions (they may contain sensitive text).
+- `FAULT_CREATE_ISSUE_500_RATE` is for alert demos only and must stay 0 by default.
 - Do not add CTMS/EDC, email ingestion, CAPA, notifications, duplicate detection, or multi-user auth.
 
 Work loop: PM grooms → SWE implements → QA checks (`docs/process.md`). Permissions: `docs/permissions.md`.

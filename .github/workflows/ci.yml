@@ -28,8 +28,10 @@ jobs:
       - name: Validate compose files
         run: |
           docker compose -f docker-compose.yaml config >/dev/null
+          docker compose -f docker-compose.yaml --profile observability config >/dev/null
           docker compose -f docker-compose.prod.yaml config >/dev/null
 
+  # Same steps as `make test-all`: start Compose, wait for the API, unit + integration tests, tear down.
   integration:
     runs-on: ubuntu-latest
     steps:
@@ -37,30 +39,10 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - name: Start dev stack
-        run: docker compose -f docker-compose.yaml up -d --build
-      - name: Wait for API
-        run: |
-          for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8000/api/studies >/dev/null; then
-              exit 0
-            fi
-            sleep 2
-          done
-          docker compose -f docker-compose.yaml logs
-          exit 1
-      - name: Integration tests
-        working-directory: backend
-        env:
-          INTEGRATION_BASE_URL: http://127.0.0.1:8000
-        run: |
-          uv sync
-          uv run pytest ../tests/integration -m integration
-      - name: Stop stack
-        if: always()
-        run: docker compose -f docker-compose.yaml down
+      - name: Unit + integration tests against Compose
+        run: make test-all
 
-  # Deploy artifact is GHCR :prod. Gate on unit tests + compose validate only.
+  # Deploy artifact is GHCR :prod (and :<sha>). Gate on unit tests + compose validate only.
   # The integration job stays as CI; it does not block publish (compose HTTP can be slow/fragile).
   publish:
     name: Publish production image
@@ -73,6 +55,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}
     steps:
       - uses: actions/checkout@v4
       - name: Image name
@@ -100,3 +84,90 @@ jobs:
           echo "  export PROD_IMAGE=${{ steps.image.outputs.name }}:prod"
           echo "  docker compose -f docker-compose.prod.yaml pull"
           echo "  docker compose -f docker-compose.prod.yaml up -d"
+
+  # ---- Continuous deployment to the EC2 host over SSH ----
+  # Needs repo variable EC2_HOST (deploy is skipped while it is unset), EC2_USER (default ubuntu),
+  # optional DEPLOY_DIR, DEV_PORT, PROD_PORT, and secret EC2_SSH_KEY. See docs/deployment.md.
+  # Both stacks run the image built from this commit (:<sha>), so dev and prod get the same artifact.
+
+  deploy-dev:
+    name: Deploy dev stack (auto)
+    needs: publish
+    if: vars.EC2_HOST != ''
+    runs-on: ubuntu-latest
+    environment:
+      name: development
+      url: http://${{ vars.EC2_HOST }}:${{ vars.DEV_PORT || '8081' }}/log
+    concurrency:
+      group: deploy-development
+      cancel-in-progress: false
+    env:
+      DEPLOY_DIR: ${{ vars.DEPLOY_DIR || 'site-issue-triage' }}
+      IMAGE: ${{ needs.publish.outputs.image }}:${{ github.sha }}
+      PORT: ${{ vars.DEV_PORT || '8081' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy compose file to host
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.EC2_HOST }}
+          username: ${{ vars.EC2_USER || 'ubuntu' }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: docker-compose.prod.yaml
+          target: ${{ env.DEPLOY_DIR }}
+      - name: Pull and restart dev stack
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ vars.EC2_HOST }}
+          username: ${{ vars.EC2_USER || 'ubuntu' }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: DEPLOY_DIR,IMAGE,PORT
+          script: |
+            set -e
+            cd "$DEPLOY_DIR"
+            export PROD_IMAGE="$IMAGE" PROD_PORT="$PORT"
+            docker compose -p site-issue-triage-dev -f docker-compose.prod.yaml pull api
+            docker compose -p site-issue-triage-dev -f docker-compose.prod.yaml up -d
+            for i in $(seq 1 30); do
+              curl -fsS "http://127.0.0.1:$PORT/api/studies" >/dev/null && echo "dev healthy" && exit 0
+              sleep 2
+            done
+            docker compose -p site-issue-triage-dev -f docker-compose.prod.yaml logs --tail 50 api
+            exit 1
+
+  deploy-prod:
+    name: Deploy production (approval required)
+    needs: [publish, deploy-dev]
+    if: vars.EC2_HOST != ''
+    runs-on: ubuntu-latest
+    # Protected environment: required reviewers approve before this job starts.
+    environment:
+      name: production
+      url: http://${{ vars.EC2_HOST }}${{ vars.PROD_PORT && format(':{0}', vars.PROD_PORT) || '' }}/log
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      DEPLOY_DIR: ${{ vars.DEPLOY_DIR || 'site-issue-triage' }}
+      IMAGE: ${{ needs.publish.outputs.image }}:${{ github.sha }}
+      PORT: ${{ vars.PROD_PORT || '80' }}
+    steps:
+      - name: Pull and restart production stack
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ vars.EC2_HOST }}
+          username: ${{ vars.EC2_USER || 'ubuntu' }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: DEPLOY_DIR,IMAGE,PORT
+          script: |
+            set -e
+            cd "$DEPLOY_DIR"
+            export PROD_IMAGE="$IMAGE" PROD_PORT="$PORT"
+            docker compose -f docker-compose.prod.yaml pull api
+            docker compose -f docker-compose.prod.yaml up -d
+            for i in $(seq 1 30); do
+              curl -fsS "http://127.0.0.1:$PORT/api/studies" >/dev/null && echo "prod healthy" && exit 0
+              sleep 2
+            done
+            docker compose -f docker-compose.prod.yaml logs --tail 50 api
+            exit 1

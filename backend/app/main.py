@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from app.deps import get_store
 from app.errors import StoreError
 from app.routers import issues, sites, studies
+from app.telemetry import setup_observability
 
 DEFAULT_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -90,4 +91,5 @@ async def validation_error(_request: Request, exc: RequestValidationError) -> JS
     return JSONResponse(status_code=400, content={"error": error})
 
 
+setup_observability(app)
 mount_frontend(app)
