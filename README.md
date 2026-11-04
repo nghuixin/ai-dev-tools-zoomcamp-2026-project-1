@@ -1,4 +1,4 @@
-# Site Issue Triage Assistant
+# Site Issue Triage Assistant - http://3.238.5.106/log
 
 Local MVP for a single site manager: log a free-text site issue, optionally get an editable AI triage, save it, and track it to resolution.
 
