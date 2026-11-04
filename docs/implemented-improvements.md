@@ -81,7 +81,7 @@ Both deploy the image from the same commit (`:<sha>`), so production gets exactl
   - Prometheus counted 2xx and 5xx creates.
   - Loki held the JSON lines.
   - A trace ID from a failed request's log line returned its trace from Tempo (`service.name=site-issue-triage-api`).
-  - Screenshot: [`screenshots/grafana-dashboard.png`](./screenshots/grafana-dashboard.png).
+- Screenshots of every local UI, all from one run, are in [`screenshots/observability/`](./screenshots/observability/README.md): the dashboard, Loki error logs, the Tempo trace for one of those log lines (matching trace ID), the firing alert, and the Prometheus scrape target.
 
 ## 6. Alert on POST /api/issues 5xx rate
 
@@ -92,7 +92,7 @@ Both deploy the image from the same commit (`:<sha>`), so production gets exactl
 
 To demonstrate it, `FAULT_CREATE_ISSUE_500_RATE` (0–1, default 0) makes that share of creates return a 500 on purpose. `make alert-demo` restarts the API with it set to 0.5.
 
-- Verified locally: with half of creates failing, the alert went to **firing** at about 45% errors. Screenshot: [`screenshots/prometheus-alert-firing.png`](./screenshots/prometheus-alert-firing.png).
+- Verified locally: with half of creates failing, the alert went to **firing** at about 45% errors. Screenshot: [`screenshots/observability/prometheus-alert-firing.png`](./screenshots/observability/prometheus-alert-firing.png).
 
 ## 7. Alert poller → coding agent
 
@@ -109,8 +109,39 @@ To demonstrate it, `FAULT_CREATE_ISSUE_500_RATE` (0–1, default 0) makes that s
 - Tests: `backend/tests/test_poll_alerts.py` covers alert IDs, brief content, and handling each alert once.
 - Verified locally: during the alert demo the poller picked up `CreateIssue5xxRateHigh` and wrote a brief with the alert, 5xx log lines and trace IDs. Example: [`observability/example-alert-brief.md`](./observability/example-alert-brief.md).
 
+## Best practice: observability for a live site
+
+**Where this project stands.** The observability stack runs locally with the dev Compose stack, not on the live EC2 site. For this course that's enough: the requirement is that traces, logs, metrics and alerting are implemented and demonstrable, which the code, tests and screenshots show. In a real production service you would also monitor the live environment. The practices below are how to do that safely. ✓ marks what this repo already does.
+
+**Exposure and access**
+- **Never expose observability UIs publicly without authentication.** The local Grafana uses anonymous admin access for convenience; on a server that would let anyone read logs and change dashboards. Turn anonymous access off, set an admin password from a secret, and put Grafana behind TLS.
+- **Prefer private access.** Bind Grafana, Prometheus and Loki to `127.0.0.1` on the host and reach them over an SSH tunnel (`ssh -L 3000:localhost:3000 ubuntu@<host>`) or AWS SSM port forwarding, with no extra open ports in the security group. Treat `/metrics` as internal too.
+
+**Where the stack runs**
+- **Keep monitoring separate from what it monitors.** If Grafana and Prometheus run on the same small instance as the app, they compete for memory and go down with it. Use a separate host, or a managed service (Grafana Cloud, Amazon Managed Prometheus/Grafana, CloudWatch with X-Ray), so an outage is still visible.
+- **Size for it.** The five extra containers need roughly 1–2 GB of RAM; on a micro instance they can starve the app.
+
+**Data**
+- **Never log sensitive data.** ✓ Request logs carry method, route, status and timing, never issue descriptions (`AGENTS.md`). Production retention and access rules matter more once logs live on a server.
+- **Set retention and storage limits** for Prometheus, Loki and Tempo, and keep their data on persistent volumes.
+- **Sample traces under real load** (for example, a parent-based ratio sampler at 10%), keeping all error traces if the backend supports tail sampling. Locally, every request is traced. ✓ Images are pinned to exact versions and all config is in the repo.
+
+**Alerting**
+- **Alert on symptoms users feel,** such as error rate and latency, not on causes. ✓ `CreateIssue5xxRateHigh` measures failed saves directly, with a `for:` window so short blips don't page.
+- **Give every alert a runbook.** ✓ The alert carries summary, description and runbook annotations.
+- **Monitor the monitoring.** Alert when a scrape target is down (`up == 0`), and add an always-firing "watchdog" alert so you notice if alerting itself stops working.
+- **Route and silence alerts with Alertmanager.** In production, Prometheus sends alerts to Alertmanager, which groups duplicates, supports silences during maintenance, and notifies people by email, Slack or paging. The poller in this repo reads Prometheus directly, which suits a demo. In production it would sit behind Alertmanager, for example as a webhook receiver.
+- **Keep a human in the loop for agent actions.** ✓ The poller's brief tells the agent not to push, deploy or change infrastructure; fixes still go through a PR, CI and the production approval gate.
+
+**If you add monitoring to the EC2 site**, the minimal safe version is:
+1. run `--profile observability` on the host with every UI port bound to `127.0.0.1`;
+2. disable anonymous Grafana access;
+3. open Grafana through an SSH tunnel.
+
+The better version moves metrics, logs and traces to a managed backend (for example, the Grafana Cloud free tier) and points the app's OTLP endpoint there.
+
 ## Still to do by hand
 
 1. Add the `EC2_HOST` variable and `EC2_SSH_KEY` secret ([`deployment.md`](./deployment.md)), then push to `master` to run the first automated deploy and approve it in the Actions tab.
 2. Check the EC2 security group allows SSH from GitHub Actions, and that the host can pull from GHCR.
-3. Optionally run the observability profile on EC2 too, if you want dashboards for the live stack. Today it runs with the dev stack.
+3. Optional: monitor the live site as well, following the best practice above. It isn't needed for the course.

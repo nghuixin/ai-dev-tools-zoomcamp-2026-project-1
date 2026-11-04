@@ -13,6 +13,6 @@
 | One command runs the full test suite | met | `make test-all` → `scripts/test-all.sh` (Compose up, wait, unit + integration, teardown); CI `integration` job runs the same target |
 | Work tracked as issues with acceptance criteria | met | GitHub Issues #1–#12, each with an acceptance-criteria checklist; #1–#6 closed by commit, #7–#12 by PR |
 | Observability: traces, logs, metrics | met | `backend/app/telemetry.py` (OTel FastAPI auto-instrumentation, JSON logs with `trace_id`, `/metrics`); Compose `observability` profile with Grafana, Tempo, Loki (Alloy), Prometheus; dashboard provisioned |
-| Alerting | met | Prometheus `CreateIssue5xxRateHigh` (>5% 5xx on POST /api/issues for 1m); `make alert-demo` fires it; screenshot `docs/screenshots/prometheus-alert-firing.png` |
+| Alerting | met | Prometheus `CreateIssue5xxRateHigh` (>5% 5xx on POST /api/issues for 1m); `make alert-demo` fires it; screenshot `docs/screenshots/observability/prometheus-alert-firing.png` |
 | Alerts reach a coding agent | met | `scripts/poll_alerts.py` → incident brief with logs + trace IDs → `ALERT_AGENT_CMD`; example `docs/observability/example-alert-brief.md` |
 | Documented extension pack (instructions, workflow, subagent, MCP, hook, permissions) | met | Course pack `.agents/skills` + `.agents/agents` (PM/SWE/QA); `docs/process.md` + `docs/permissions.md`; `docs/extension-pack.md` maps the pack |

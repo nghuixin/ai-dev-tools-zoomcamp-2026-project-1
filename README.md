@@ -109,7 +109,9 @@ integration (make test-all) — runs on every push, does not gate publish
 - **Alert:** `CreateIssue5xxRateHigh` fires when more than 5% of `POST /api/issues` return 5xx for a minute ([`ops/observability/alerts.yml`](./ops/observability/alerts.yml)). `make alert-demo` restarts the API with half of creates failing (`FAULT_CREATE_ISSUE_500_RATE=0.5`) to see it fire.
 - **Alert → coding agent:** `make poll-alerts` runs [`scripts/poll_alerts.py`](./scripts/poll_alerts.py). It polls Prometheus, gathers the matching 5xx logs and trace IDs from Loki, writes an incident brief to `.alerts/`, and hands it to `ALERT_AGENT_CMD` (for example `claude -p`). Without an agent it prints the brief. [Example brief](./docs/observability/example-alert-brief.md).
 
-![Grafana dashboard during the alert demo](./docs/screenshots/grafana-dashboard.png)
+![Grafana dashboard during the alert demo](./docs/screenshots/observability/grafana-dashboard.png)
+
+More screenshots, all from one local run (Loki error logs, the Tempo trace for one of those log lines, the firing alert, the Prometheus scrape target): [`docs/screenshots/observability/`](./docs/screenshots/observability/README.md). The stack runs locally with the dev setup, not on the live EC2 site. Why, and how you'd monitor a live site safely: [best practice](./docs/implemented-improvements.md#best-practice-observability-for-a-live-site).
 
 ## Expected behavior
 
